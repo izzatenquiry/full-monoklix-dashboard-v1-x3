@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-// FIX: Import Language type for state management.
-import { type View, type User, type BatchProcessorPreset, type Language, UserStatus } from './types';
+// FIX: Explicitly import UserStatus as a type to prevent runtime import errors if it's only a type definition.
+import { type View, type User, type BatchProcessorPreset, type Language, type UserStatus } from './types';
 import Sidebar from './components/Sidebar';
 import AiTextSuiteView from './components/views/AiTextSuiteView';
 import AiImageSuiteView from './components/views/AiImageSuiteView';
@@ -89,62 +89,7 @@ const NotificationBanner: React.FC<{ message: string; onDismiss: () => void }> =
     </div>
 )};
 
-type AssigningStatus = 'scanning' | 'assigning' | 'success' | 'error';
-interface AssigningTokenModalProps {
-  status: AssigningStatus;
-  error: string | null;
-  scanProgress: { current: number; total: number };
-  onRetry: () => void;
-}
-
-const AssigningTokenModal: React.FC<AssigningTokenModalProps> = ({ status, error, scanProgress, onRetry }) => {
-    // FIX: Correctly access translations via `assigningTokenModal` key.
-    const T = getTranslations().assigningTokenModal;
-    
-    const statusInfo = {
-        scanning: {
-            icon: <Spinner />,
-            title: T.scanningTitle,
-            message: scanProgress.total > 0
-                ? T.scanningMessage.replace('{current}', String(scanProgress.current)).replace('{total}', String(scanProgress.total))
-                : T.scanningMessageDefault,
-        },
-        assigning: {
-            icon: <Spinner />,
-            title: T.assigningTitle,
-            message: T.assigningMessage,
-        },
-        success: {
-            icon: <ShieldCheckIcon className="w-12 h-12 text-green-500 mx-auto" />,
-            title: T.successTitle,
-            message: T.successMessage,
-        },
-        error: {
-            icon: <AlertTriangleIcon className="w-12 h-12 text-red-500 mx-auto" />,
-            title: T.errorTitle,
-            message: error || T.errorMessageDefault,
-        },
-    };
-
-    const currentStatusInfo = statusInfo[status];
-
-    return (
-        <div className="fixed inset-0 bg-black/70 flex flex-col items-center justify-center z-50 p-4 animate-zoomIn" aria-modal="true" role="dialog">
-            <div className="bg-white dark:bg-neutral-900 rounded-lg shadow-xl p-8 text-center max-w-sm w-full">
-                {currentStatusInfo.icon}
-                <h2 className="text-xl font-bold mt-4 text-neutral-800 dark:text-neutral-100">{currentStatusInfo.title}</h2>
-                <p className="text-neutral-500 dark:text-neutral-400 mt-2 text-sm">
-                    {currentStatusInfo.message}
-                </p>
-                {status === 'error' && (
-                    <button onClick={onRetry} className="mt-6 w-full bg-primary-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-primary-700 transition-colors">
-                        {T.retryButton}
-                    </button>
-                )}
-            </div>
-        </div>
-    );
-};
+// Removed AssigningTokenModal component as per request to disable auto-assignment popup
 
 interface ServerSelectionModalProps {
   isOpen: boolean;
@@ -158,9 +103,9 @@ const ServerSelectionModal: React.FC<ServerSelectionModalProps> = ({ isOpen, ser
     const T = getTranslations().serverSelectionModal;
 
     const getUsageColor = (count: number) => {
-        if (count < 10) return 'text-green-500';
-        if (count < 20) return 'text-yellow-500';
-        return 'text-red-500';
+        if (count < 10) return 'text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400';
+        if (count < 20) return 'text-yellow-600 bg-yellow-100 dark:bg-yellow-900/30 dark:text-yellow-400';
+        return 'text-red-600 bg-red-100 dark:bg-red-900/30 dark:text-red-400';
     };
 
     const handleAutoSelect = () => {
@@ -180,7 +125,7 @@ const ServerSelectionModal: React.FC<ServerSelectionModalProps> = ({ isOpen, ser
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-zoomIn" onClick={onClose}>
-            <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl p-6 relative border border-neutral-200 dark:border-neutral-800" onClick={e => e.stopPropagation()}>
+            <div className="w-full max-w-lg bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl p-6 relative border border-neutral-200 dark:border-neutral-800 flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
                 <button 
                     onClick={onClose} 
                     className="absolute top-4 right-4 p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 transition-colors"
@@ -193,43 +138,59 @@ const ServerSelectionModal: React.FC<ServerSelectionModalProps> = ({ isOpen, ser
                     <p className="text-neutral-500 dark:text-neutral-400 text-sm">{T.subtitle}</p>
                 </div>
 
-                <div className="flex flex-col gap-3 max-h-[60vh] overflow-y-auto custom-scrollbar pr-1">
+                 {/* Auto Select Button (Prominent) */}
+                 <button
+                    onClick={handleAutoSelect}
+                    className="w-full flex items-center justify-center gap-3 p-4 mb-6 bg-gradient-to-r from-primary-600 to-blue-600 text-white rounded-xl shadow-lg hover:shadow-primary-500/25 hover:scale-[1.01] transition-all group"
+                >
+                    <SparklesIcon className="w-6 h-6" />
+                    <div className="text-left">
+                        <p className="font-bold text-base">Auto-Connect Best Server</p>
+                        <p className="text-xs opacity-80 font-normal">Automatically picks the fastest server.</p>
+                    </div>
+                </button>
+
+                <div className="border-b border-neutral-200 dark:border-neutral-800 mb-4 shrink-0"></div>
+                <h3 className="text-sm font-bold text-neutral-600 dark:text-neutral-400 mb-3 shrink-0 px-1">Manual Selection ({servers.length})</h3>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-3 min-h-0">
                     {servers.map(serverUrl => {
                         const usage = serverUsage[serverUrl] || 0;
                         const serverName = serverUrl.replace('https://', '').replace('.monoklix.com', '');
                         const isAppleFriendly = serverName === 's1' || serverName === 's6';
+                        const currentServer = sessionStorage.getItem('selectedProxyServer');
+                        const isSelected = currentServer === serverUrl;
+
                         return (
                             <button
                                 key={serverUrl}
                                 onClick={() => onSelect(serverUrl)}
-                                className="w-full flex items-center p-4 bg-neutral-50 dark:bg-neutral-800/50 rounded-xl border border-neutral-200 dark:border-neutral-700 hover:border-primary-500 hover:shadow-md transition-all group"
+                                className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all group text-left ${isSelected ? 'bg-primary-50 dark:bg-primary-900/10 border-primary-500 ring-1 ring-primary-500' : 'bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 hover:border-primary-400 dark:hover:border-primary-500'}`}
                             >
-                                <ServerIcon className="w-8 h-8 text-primary-500" />
-                                <div className="flex-1 ml-4 text-left flex items-center gap-2">
-                                    <p className="font-bold text-lg capitalize">{T.server} {serverName.toUpperCase()}</p>
-                                    {isAppleFriendly && <AppleIcon className="w-5 h-5 text-neutral-500 dark:text-neutral-400" title="Optimized for Apple devices" />}
+                                <div className="flex items-center gap-3">
+                                    <div className={`p-2 rounded-lg ${isSelected ? 'bg-primary-100 text-primary-600' : 'bg-neutral-100 dark:bg-neutral-700 text-neutral-500'}`}>
+                                        <ServerIcon className="w-5 h-5" />
+                                    </div>
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <p className="font-bold text-sm capitalize">{T.server} {serverName.toUpperCase()}</p>
+                                            {isAppleFriendly && <AppleIcon className="w-3 h-3 text-neutral-400" title="Apple Optimized" />}
+                                        </div>
+                                        <p className="text-[10px] text-neutral-500 font-mono">{serverUrl.replace('https://', '')}</p>
+                                    </div>
                                 </div>
-                                <div className={`flex items-center justify-center gap-2 text-sm font-semibold mr-2 ${getUsageColor(usage)}`}>
-                                    <UsersIcon className="w-4 h-4" />
-                                    <span>{usage} Users</span>
+
+                                <div className="flex items-center gap-3">
+                                    <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold ${getUsageColor(usage)}`}>
+                                        <UsersIcon className="w-3 h-3" />
+                                        <span>{usage}</span>
+                                    </div>
+                                    {isSelected && <CheckCircleIcon className="w-5 h-5 text-primary-600" />}
+                                    {!isSelected && <ChevronRightIcon className="w-5 h-5 text-neutral-300 group-hover:text-neutral-500" />}
                                 </div>
-                                <ChevronRightIcon className="w-6 h-6 text-neutral-400 group-hover:text-primary-500 transition-colors" />
                             </button>
                         );
                     })}
-
-                    {/* Auto Select Button */}
-                    <button
-                        onClick={handleAutoSelect}
-                        className="w-full flex items-center p-4 mt-2 bg-primary-600 text-white rounded-xl shadow-lg hover:bg-primary-700 transition-all group"
-                    >
-                        <SparklesIcon className="w-8 h-8" />
-                        <div className="flex-1 ml-4 text-left">
-                            <p className="font-bold text-lg">Auto Select</p>
-                            <p className="text-sm opacity-80">Connect to the fastest server</p>
-                        </div>
-                        <ChevronRightIcon className="w-6 h-6 text-white/70 group-hover:text-white transition-colors" />
-                    </button>
                 </div>
             </div>
         </div>
@@ -253,18 +214,18 @@ const App: React.FC = () => {
   const [isLogSidebarOpen, setIsLogSidebarOpen] = useState(false);
   const [isShowingWelcome, setIsShowingWelcome] = useState(false);
   const [justLoggedIn, setJustLoggedIn] = useState(false);
-  const [needsTokenAssignment, setNeedsTokenAssignment] = useState(false);
+  // Removed needsTokenAssignment as we no longer force the modal
   const [veoTokenRefreshedAt, setVeoTokenRefreshedAt] = useState<string | null>(null);
-  const [showAssignModal, setShowAssignModal] = useState(false);
-  const isAssigningTokenRef = useRef(false);
-  const [assigningStatus, setAssigningStatus] = useState<AssigningStatus>('scanning');
+  
+  // State for manual token assignment (used by ApiKeyStatus)
   const [scanProgress, setScanProgress] = useState({ current: 0, total: 0 });
-  const [autoAssignError, setAutoAssignError] = useState<string | null>(null);
-  const [notification, setNotification] = useState<string | null>(null);
+  const isAssigningTokenRef = useRef(false);
+  
   const [needsSilentTokenAssignment, setNeedsSilentTokenAssignment] = useState(false);
   const [showServerModal, setShowServerModal] = useState(false);
   const [serverOptions, setServerOptions] = useState<{ servers: string[], usage: Record<string, number> }>({ servers: [], usage: {} });
   const [serverModalPurpose, setServerModalPurpose] = useState<'login' | 'change'>('login');
+  const [notification, setNotification] = useState<string | null>(null);
   
   // FIX: Correctly access translations via `app` key.
   const T = getTranslations().app;
@@ -367,21 +328,21 @@ const App: React.FC = () => {
     setSessionChecked(true);
   }, []);
 
+  // Logic to assign token, kept for manual claiming via ApiKeyStatus component
   const assignTokenProcess = useCallback(async (): Promise<{ success: boolean; error: string | null; }> => {
         if (!currentUser || isAssigningTokenRef.current) {
             return { success: false, error: "Process is already running or user is not available." };
         }
         
         isAssigningTokenRef.current = true;
-        setAssigningStatus('scanning');
         
         console.log('Starting auto-assignment process...');
 
         const tokensJSON = sessionStorage.getItem('veoAuthTokens');
         if (!tokensJSON) {
-            const errorMsg = "System could not find any available connection tokens. Please contact the admin.";
+            // Updated error message to be more user-friendly and actionable
+            const errorMsg = "Connection setup incomplete. Please click 'Try Again' to update your access token.";
             isAssigningTokenRef.current = false;
-            setAssigningStatus('error');
             return { success: false, error: errorMsg };
         }
         
@@ -407,12 +368,10 @@ const App: React.FC = () => {
 
                 if (isImagenOk && isVeoOk) {
                     console.log(`[Auto-Assign] Found valid token: ...${tokenData.token.slice(-6)}. Assigning to user.`);
-                    setAssigningStatus('assigning');
                     const assignResult = await assignPersonalTokenAndIncrementUsage(currentUser.id, tokenData.token);
 
                     if (assignResult.success === false) {
                         console.warn(`[Auto-Assign] Could not assign token ...${tokenData.token.slice(-6)}: ${assignResult.message}. Trying next.`);
-                        setAssigningStatus('scanning'); // Go back to scanning
                         if (assignResult.message === 'DB_SCHEMA_MISSING_COLUMN_personal_auth_token' && currentUser.role === 'admin') {
                             finalError = "Database schema is outdated.";
                             alert("Database schema is outdated.\n\nPlease go to your Supabase dashboard and run the following SQL command to add the required column:\n\nALTER TABLE public.users ADD COLUMN personal_auth_token TEXT;");
@@ -423,7 +382,6 @@ const App: React.FC = () => {
                         console.log('[Auto-Assign] Successfully assigned personal token.');
                         tokenAssigned = true;
                         finalError = null;
-                        setAssigningStatus('success');
                         break;
                     }
                 } else {
@@ -444,10 +402,6 @@ const App: React.FC = () => {
             isAssigningTokenRef.current = false;
         }
         
-        if (!tokenAssigned) {
-            setAssigningStatus('error');
-        }
-
         return { success: tokenAssigned, error: finalError };
     }, [currentUser, handleUserUpdate]);
 
@@ -612,59 +566,10 @@ const App: React.FC = () => {
         };
     }, [currentUser?.id, handleLogout, T.sessionTerminated]);
     
-    const retryAssignment = useCallback(async () => {
-        setAssigningStatus('scanning');
-        setAutoAssignError(null);
-        setScanProgress({ current: 0, total: 0 });
-        const result = await assignTokenProcess();
-        if (result.success) {
-            setTimeout(() => {
-                setShowAssignModal(false);
-                setJustLoggedIn(true);
-            }, 1500); // Show success message for a bit
-        } else if (result.error) {
-            setAutoAssignError(result.error);
-        }
-    }, [assignTokenProcess]);
-
-    // Effect to handle the post-login token assignment flow.
-    // This runs after the component has re-rendered with the new user state, avoiding stale closures.
-    useEffect(() => {
-        if (!needsTokenAssignment || !currentUser) return;
-
-        const runAssignment = async () => {
-            setShowAssignModal(true);
-            setAssigningStatus('scanning');
-            setAutoAssignError(null);
-            setScanProgress({ current: 0, total: 0 });
-
-            // This call is now safe; `assignTokenProcess` has the fresh `currentUser` from this render cycle.
-            const result = await assignTokenProcess();
-
-            if (result.success) {
-                setTimeout(() => {
-                    setShowAssignModal(false);
-                    // On successful login assignment, trigger welcome. For re-assignment, it will just close.
-                    if (justLoggedIn) {
-                        setJustLoggedIn(true);
-                    }
-                }, 1500);
-            } else {
-                setAutoAssignError(result.error);
-                setAssigningStatus('error');
-            }
-            setNeedsTokenAssignment(false); // Reset the trigger.
-        };
-
-        runAssignment();
-    }, [needsTokenAssignment, currentUser, assignTokenProcess, justLoggedIn]);
-  
   const proceedWithPostLoginFlow = (user: User) => {
-    if (user && !user.personalAuthToken) {
-        setNeedsTokenAssignment(true);
-    } else {
-        setJustLoggedIn(true);
-    }
+    // Directly let user in without blocking modal.
+    // If user has no token, they can claim manually via Settings or ApiKeyStatus.
+    setJustLoggedIn(true);
   };
 
     // FIX: Removed local definition of getAvailableServersForUser. It's now imported from userService.
@@ -910,21 +815,26 @@ const App: React.FC = () => {
   let isBlocked = false;
   let blockMessage = { title: T.accessDenied, body: "" };
 
-  const isSubscriptionActive = currentUser.status === 'subscription' && currentUser.subscriptionExpiry && Date.now() < currentUser.subscriptionExpiry;
-
   const adminOnlyViews: View[] = ['api-generator', 'master-dashboard'];
 
   if (adminOnlyViews.includes(activeView) && currentUser.role !== 'admin') {
       isBlocked = true;
       blockMessage = { title: T.accessDenied, body: T.adminOnlyFeature };
-  } else if (currentUser.status === 'admin' || currentUser.status === 'lifetime' || isSubscriptionActive) {
-    isBlocked = false;
   } 
-  else if (currentUser.status === 'subscription' && !isSubscriptionActive) {
-      isBlocked = true;
-      blockMessage = { title: T.subscriptionExpired, body: T.subscriptionExpiredMessage };
+  else if (currentUser.status === 'admin' || currentUser.status === 'lifetime') {
+      isBlocked = false;
+  } 
+  else if (currentUser.status === 'subscription') {
+      // Strictly check expiry for subscription users
+      const hasExpired = !currentUser.subscriptionExpiry || Date.now() > currentUser.subscriptionExpiry;
+      if (hasExpired) {
+          isBlocked = true;
+          blockMessage = { title: T.subscriptionExpired, body: T.subscriptionExpiredMessage };
+      } else {
+          isBlocked = false;
+      }
   }
-  // Block any other status (e.g., inactive, pending_payment)
+  // Block any other status (e.g., inactive, pending_payment, trial)
   else {
       isBlocked = true;
       blockMessage = { title: T.accessDenied, body: T.accountStatusBlocked.replace('{status}', currentUser.status) };
@@ -978,7 +888,6 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-neutral-100 dark:bg-neutral-900 text-neutral-800 dark:text-neutral-100 font-sans">
-      {showAssignModal && <AssigningTokenModal status={assigningStatus} error={autoAssignError} onRetry={retryAssignment} scanProgress={scanProgress} />}
       <Sidebar 
         activeView={activeView} 
         setActiveView={setActiveView} 

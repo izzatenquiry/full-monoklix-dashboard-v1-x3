@@ -708,7 +708,7 @@ const translations = {
             title: 'Settings',
             tabs: {
                 profile: 'User Profile',
-                api: 'Integrations',
+                api: 'Token!',
                 contentAdmin: 'Content Admin',
                 userDb: 'User Database'
             },

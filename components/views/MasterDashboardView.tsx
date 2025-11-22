@@ -375,6 +375,12 @@ const MasterDashboardView: React.FC<MasterDashboardViewProps> = ({ currentUser, 
                      if (!statusRes.ok) continue;
                      operations = statusData.operations;
                      const op = operations[0];
+                     
+                     // FIX: Added strict check for FAILED status string to stop loop immediately
+                     if (op.status === 'MEDIA_GENERATION_STATUS_FAILED') {
+                         throw new Error('Generation Failed: MEDIA_GENERATION_STATUS_FAILED');
+                     }
+
                      const isSuccess = op.done || ['MEDIA_GENERATION_STATUS_COMPLETED', 'MEDIA_GENERATION_STATUS_SUCCESS', 'MEDIA_GENERATION_STATUS_SUCCESSFUL'].includes(op.status);
 
                      if (isSuccess) {

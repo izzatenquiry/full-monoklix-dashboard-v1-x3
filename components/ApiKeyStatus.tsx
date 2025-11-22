@@ -1,62 +1,211 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { KeyIcon, CheckCircleIcon, XIcon, AlertTriangleIcon, RefreshCwIcon, SparklesIcon, TelegramIcon } from './Icons';
+import { KeyIcon, CheckCircleIcon, XIcon, AlertTriangleIcon, RefreshCwIcon, SparklesIcon, TelegramIcon, ServerIcon, ImageIcon, VideoIcon } from './Icons';
 import Spinner from './common/Spinner';
 import { runApiHealthCheck, type HealthCheckResult } from '../services/geminiService';
 import { type User, type Language } from '../types';
-import { saveUserPersonalAuthToken } from '../services/userService';
+import { saveUserPersonalAuthToken, assignPersonalTokenAndIncrementUsage } from '../services/userService';
 import { runComprehensiveTokenTest, type TokenTestResult } from '../services/imagenV3Service';
 import { getTranslations } from '../services/translations';
 
-const ClaimTokenModal: React.FC<{
-  status: 'searching' | 'success' | 'error';
-  error: string | null;
-  onRetry: () => void;
-  onClose: () => void;
-  language: Language;
-}> = ({ status, error, onRetry, onClose, language }) => {
-    const T = getTranslations(language).claimTokenModal;
+// --- NEW: Token Selection Modal ---
+interface TokenSelectionModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    currentUser: User;
+    onUserUpdate: (user: User) => void;
+    assignTokenProcess: () => Promise<{ success: boolean; error: string | null; }>;
+    language: Language;
+}
+
+const TokenSelectionModal: React.FC<TokenSelectionModalProps> = ({ isOpen, onClose, currentUser, onUserUpdate, assignTokenProcess, language }) => {
+    const [tokens, setTokens] = useState<{ token: string; createdAt: string }[]>([]);
+    // Updated state to store individual service results
+    const [testResults, setTestResults] = useState<Map<string, { status: 'idle' | 'testing' | 'complete', results?: TokenTestResult[] }>>(new Map());
+    const [claimingToken, setClaimingToken] = useState<string | null>(null);
+    const [isAutoAssigning, setIsAutoAssigning] = useState(false);
+    const [autoMessage, setAutoMessage] = useState('');
+    
+    useEffect(() => {
+        if (isOpen) {
+            const tokensJSON = sessionStorage.getItem('veoAuthTokens');
+            if (tokensJSON) {
+                try {
+                    const parsed = JSON.parse(tokensJSON);
+                    setTokens(Array.isArray(parsed) ? parsed : []);
+                } catch (e) {
+                    console.error("Failed to parse tokens", e);
+                }
+            }
+        }
+    }, [isOpen]);
+
+    const handleTestToken = async (token: string) => {
+        setTestResults(prev => new Map(prev).set(token, { status: 'testing' }));
+        
+        try {
+            // This runs individual tests for Imagen and Veo without retry logic
+            const results = await runComprehensiveTokenTest(token);
+            
+            setTestResults(prev => new Map(prev).set(token, { 
+                status: 'complete', 
+                results
+            }));
+        } catch (e) {
+            // Fallback if the test function itself crashes
+            setTestResults(prev => new Map(prev).set(token, { status: 'complete', results: [
+                { service: 'Imagen', success: false, message: 'Error' },
+                { service: 'Veo', success: false, message: 'Error' }
+            ] }));
+        }
+    };
+
+    const handleClaimToken = async (token: string) => {
+        setClaimingToken(token);
+        // First clear existing token
+        await saveUserPersonalAuthToken(currentUser.id, null);
+        
+        const result = await assignPersonalTokenAndIncrementUsage(currentUser.id, token);
+        
+        if (result.success) {
+            onUserUpdate(result.user);
+            setTimeout(onClose, 1000);
+        } else {
+            alert(`Failed to claim: ${result.message}`);
+            setClaimingToken(null);
+        }
+    };
+
+    const handleAutoAssign = async () => {
+        setIsAutoAssigning(true);
+        setAutoMessage('Scanning for optimal token...');
+        
+        // First clear existing token to ensure clean state
+        await saveUserPersonalAuthToken(currentUser.id, null);
+
+        const result = await assignTokenProcess();
+        
+        if (result.success) {
+            setAutoMessage('Success! Token assigned.');
+            setTimeout(onClose, 1500);
+        } else {
+            setAutoMessage(result.error || 'Auto-assignment failed.');
+            setTimeout(() => {
+                setIsAutoAssigning(false);
+                setAutoMessage('');
+            }, 3000);
+        }
+    };
+
+    if (!isOpen) return null;
+
     return (
-    <div className="fixed inset-0 bg-black/70 flex flex-col items-center justify-center z-50 p-4 animate-zoomIn" aria-modal="true" role="dialog">
-        <div className="bg-white dark:bg-neutral-900 rounded-lg shadow-xl p-8 text-center max-w-sm w-full">
-        {status === 'searching' && (
-            <>
-            <Spinner />
-            <h2 className="text-xl font-bold mt-4">{T.searchingTitle}</h2>
-            <p className="text-neutral-500 dark:text-neutral-400 mt-2 text-sm">
-                {T.searchingMessage}
-            </p>
-            </>
-        )}
-        {status === 'success' && (
-            <>
-            <CheckCircleIcon className="w-12 h-12 text-green-500 mx-auto" />
-            <h2 className="text-xl font-bold mt-4">{T.successTitle}</h2>
-            <p className="text-neutral-500 dark:text-neutral-400 mt-2 text-sm">
-                {T.successMessage}
-            </p>
-            </>
-        )}
-        {status === 'error' && (
-            <>
-            <AlertTriangleIcon className="w-12 h-12 text-red-500 mx-auto" />
-            <h2 className="text-xl font-bold mt-4">{T.errorTitle}</h2>
-            <p className="text-neutral-500 dark:text-neutral-400 mt-2 text-sm">
-                {error || T.errorMessageDefault}
-            </p>
-            <div className="mt-6 flex gap-4">
-                <button onClick={onClose} className="w-full bg-neutral-200 dark:bg-neutral-700 font-semibold py-2 px-4 rounded-lg hover:bg-neutral-300 dark:hover:bg-neutral-600 transition-colors">
-                {T.closeButton}
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-zoomIn" onClick={onClose}>
+            <div className="w-full max-w-2xl bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl p-6 relative border border-neutral-200 dark:border-neutral-800 flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+                <button onClick={onClose} className="absolute top-4 right-4 p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 transition-colors">
+                    <XIcon className="w-5 h-5" />
                 </button>
-                <button onClick={onRetry} className="w-full bg-primary-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-primary-700 transition-colors">
-                {T.retryButton}
+
+                <div className="text-center mb-6">
+                    <h1 className="text-2xl font-bold mb-2">Select Access Token</h1>
+                    <p className="text-neutral-500 dark:text-neutral-400 text-sm">Choose a token from the pool or let AI auto-assign one for you.</p>
+                </div>
+
+                {/* Auto Assign Button */}
+                <button
+                    onClick={handleAutoAssign}
+                    disabled={isAutoAssigning}
+                    className="w-full flex items-center justify-center gap-3 p-4 mb-6 bg-gradient-to-r from-primary-600 to-blue-600 text-white rounded-xl shadow-lg hover:shadow-primary-500/25 hover:scale-[1.01] transition-all group disabled:opacity-70 disabled:cursor-not-allowed shrink-0"
+                >
+                    {isAutoAssigning ? <Spinner /> : <SparklesIcon className="w-6 h-6" />}
+                    <div className="text-left">
+                        <p className="font-bold text-base">{isAutoAssigning ? 'Auto-Assigning...' : 'Auto Assign Best Token'}</p>
+                        <p className="text-xs opacity-80 font-normal">{isAutoAssigning ? autoMessage : 'Recommended: Automatically finds a working token.'}</p>
+                    </div>
                 </button>
+
+                <div className="border-b border-neutral-200 dark:border-neutral-800 mb-4 shrink-0"></div>
+
+                <h3 className="text-sm font-bold text-neutral-600 dark:text-neutral-400 mb-3 shrink-0">Available Tokens in Pool ({tokens.length})</h3>
+
+                {/* Token List */}
+                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-3 min-h-0">
+                    {tokens.length === 0 ? (
+                         <p className="text-center text-neutral-500 py-10">No tokens available in the pool.</p>
+                    ) : (
+                        tokens.map((t, idx) => {
+                            const testState = testResults.get(t.token);
+                            const isCurrent = currentUser.personalAuthToken === t.token;
+                            const status = testState?.status || 'idle';
+                            const results = testState?.results;
+                            
+                            const imagenResult = results?.find(r => r.service === 'Imagen');
+                            const veoResult = results?.find(r => r.service === 'Veo');
+                            
+                            // Determine overall success for enabling the claim button
+                            const isClaimable = results?.every(r => r.success) || false;
+
+                            return (
+                                <div key={idx} className={`p-3 rounded-xl border transition-all ${isCurrent ? 'bg-green-50 border-green-500 dark:bg-green-900/20' : 'bg-neutral-50 dark:bg-neutral-800/50 border-neutral-200 dark:border-neutral-700'}`}>
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className="flex items-center gap-2">
+                                            <div className="bg-neutral-200 dark:bg-neutral-700 p-1.5 rounded-md">
+                                                <KeyIcon className="w-4 h-4 text-neutral-600 dark:text-neutral-300"/>
+                                            </div>
+                                            <span className="font-mono text-sm font-semibold">Token #{idx + 1} <span className="text-xs font-normal opacity-50 ml-1">(...{t.token.slice(-6)})</span></span>
+                                            {isCurrent && <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">CURRENT</span>}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button 
+                                                onClick={() => handleTestToken(t.token)}
+                                                disabled={status === 'testing'}
+                                                className="px-3 py-1.5 text-xs font-semibold bg-white dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-600 transition-colors shadow-sm"
+                                            >
+                                                {status === 'testing' ? <Spinner/> : 'Test'}
+                                            </button>
+                                            <button 
+                                                onClick={() => handleClaimToken(t.token)}
+                                                disabled={isCurrent || claimingToken !== null || !isClaimable} 
+                                                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors text-white flex items-center gap-1.5 ${isCurrent ? 'bg-green-600 opacity-50 cursor-default' : isClaimable ? 'bg-green-600 hover:bg-green-700 shadow-md hover:scale-105' : 'bg-neutral-400 cursor-not-allowed opacity-50'}`}
+                                            >
+                                                {claimingToken === t.token ? <Spinner/> : isCurrent ? 'Claimed' : 'Claim'}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Status Indicators */}
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {/* Imagen Status */}
+                                        <div className={`flex items-center justify-between p-2 rounded-lg border ${imagenResult ? (imagenResult.success ? 'bg-green-100/50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : 'bg-red-100/50 border-red-200 dark:bg-red-900/20 dark:border-red-800') : 'bg-neutral-100 dark:bg-neutral-800 border-transparent'}`}>
+                                            <div className="flex items-center gap-2">
+                                                <ImageIcon className="w-4 h-4 opacity-70"/>
+                                                <span className="text-xs font-medium">Imagen</span>
+                                            </div>
+                                            {status === 'testing' ? <Spinner/> : imagenResult ? (
+                                                imagenResult.success ? <CheckCircleIcon className="w-4 h-4 text-green-600"/> : <XIcon className="w-4 h-4 text-red-500"/>
+                                            ) : <span className="text-[10px] text-neutral-400">Untested</span>}
+                                        </div>
+
+                                        {/* Veo Status */}
+                                        <div className={`flex items-center justify-between p-2 rounded-lg border ${veoResult ? (veoResult.success ? 'bg-green-100/50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : 'bg-red-100/50 border-red-200 dark:bg-red-900/20 dark:border-red-800') : 'bg-neutral-100 dark:bg-neutral-800 border-transparent'}`}>
+                                            <div className="flex items-center gap-2">
+                                                <VideoIcon className="w-4 h-4 opacity-70"/>
+                                                <span className="text-xs font-medium">Veo 3</span>
+                                            </div>
+                                            {status === 'testing' ? <Spinner/> : veoResult ? (
+                                                veoResult.success ? <CheckCircleIcon className="w-4 h-4 text-green-600"/> : <XIcon className="w-4 h-4 text-red-500"/>
+                                            ) : <span className="text-[10px] text-neutral-400">Untested</span>}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
             </div>
-            </>
-        )}
         </div>
-    </div>
-)};
+    );
+};
+
 
 interface ApiKeyStatusProps {
     activeApiKey: string | null;
@@ -74,8 +223,9 @@ const ApiKeyStatus: React.FC<ApiKeyStatusProps> = ({ activeApiKey, currentUser, 
     const [isChecking, setIsChecking] = useState(false);
     const [results, setResults] = useState<HealthCheckResult[] | null>(null);
     const popoverRef = useRef<HTMLDivElement>(null);
-    const [claimStatus, setClaimStatus] = useState<'idle' | 'searching' | 'success' | 'error'>('idle');
-    const [claimError, setClaimError] = useState<string | null>(null);
+    
+    // New state for the robust token selection modal
+    const [isTokenSelectionOpen, setIsTokenSelectionOpen] = useState(false);
 
     const [isEditingToken, setIsEditingToken] = useState(false);
     const [tokenInput, setTokenInput] = useState('');
@@ -88,31 +238,6 @@ const ApiKeyStatus: React.FC<ApiKeyStatusProps> = ({ activeApiKey, currentUser, 
             setCurrentServer(server);
         }
     }, [isPopoverOpen]);
-
-    const handleClaimNewToken = useCallback(async () => {
-        setClaimStatus('searching');
-        setClaimError(null);
-
-        const clearResult = await saveUserPersonalAuthToken(currentUser.id, null);
-        if (clearResult.success === false) {
-            setClaimError(clearResult.message || 'Failed to clear previous token.');
-            setClaimStatus('error');
-        } else {
-            onUserUpdate(clearResult.user);
-            
-            const assignResult = await assignTokenProcess();
-            if (assignResult.success) {
-                setClaimStatus('success');
-                setTimeout(() => {
-                    setClaimStatus('idle');
-                    setIsPopoverOpen(false);
-                }, 2000);
-            } else {
-                setClaimError(assignResult.error || 'Failed to assign token.');
-                setClaimStatus('error');
-            }
-        }
-    }, [currentUser.id, onUserUpdate, assignTokenProcess]);
 
     const handleHealthCheck = async () => {
         setIsChecking(true);
@@ -183,15 +308,16 @@ const ApiKeyStatus: React.FC<ApiKeyStatusProps> = ({ activeApiKey, currentUser, 
 
     return (
         <div className="relative" ref={popoverRef}>
-            {claimStatus !== 'idle' && (
-                <ClaimTokenModal
-                    status={claimStatus}
-                    error={claimError}
-                    onClose={() => setClaimStatus('idle')}
-                    onRetry={handleClaimNewToken}
-                    language={language}
-                />
-            )}
+            {/* Replaced the old ClaimTokenModal with the new TokenSelectionModal */}
+            <TokenSelectionModal
+                isOpen={isTokenSelectionOpen}
+                onClose={() => setIsTokenSelectionOpen(false)}
+                currentUser={currentUser}
+                onUserUpdate={onUserUpdate}
+                assignTokenProcess={assignTokenProcess}
+                language={language}
+            />
+
             <button
                 onClick={() => setIsPopoverOpen(!isPopoverOpen)}
                 className="p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
@@ -217,13 +343,13 @@ const ApiKeyStatus: React.FC<ApiKeyStatusProps> = ({ activeApiKey, currentUser, 
                             )}
                         </div>
                         
-                        {/* Current Server Row - Inline Button */}
+                        {/* Current Server Row - Restored "Change Server" Button */}
                         <div className="p-2 bg-neutral-100 dark:bg-neutral-800 rounded-md flex justify-between items-center">
                             <div className="flex items-center gap-2">
                                 <span className="font-semibold text-neutral-600 dark:text-neutral-300 whitespace-nowrap">{T.currentServer}:</span>
                                 {currentServer ? (
                                     <span className="font-mono text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 px-2 py-1 rounded">
-                                        {currentServer.replace('https://', '').replace('.esaie.tech', '').toUpperCase()}
+                                        {currentServer.replace('https://', '').replace('.monoklix.com', '').toUpperCase()}
                                     </span>
                                 ) : (
                                     <span className="text-yellow-500 font-semibold text-xs">{T.notSet}</span>
@@ -240,7 +366,7 @@ const ApiKeyStatus: React.FC<ApiKeyStatusProps> = ({ activeApiKey, currentUser, 
                             </button>
                         </div>
 
-                        {/* Auth Token Row - Inline Button */}
+                        {/* Auth Token Row */}
                          <div className="p-2 bg-neutral-100 dark:bg-neutral-800 rounded-md">
                             {isEditingToken ? (
                                 <div className="space-y-2">
@@ -296,7 +422,10 @@ const ApiKeyStatus: React.FC<ApiKeyStatusProps> = ({ activeApiKey, currentUser, 
                                 {T.healthCheck}
                             </button>
                              <button
-                                onClick={handleClaimNewToken}
+                                onClick={() => {
+                                    setIsTokenSelectionOpen(true);
+                                    setIsPopoverOpen(false);
+                                }}
                                 disabled={isChecking}
                                 className="w-full flex items-center justify-center gap-2 bg-green-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 text-sm"
                             >
