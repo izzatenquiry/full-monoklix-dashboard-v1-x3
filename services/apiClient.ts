@@ -117,31 +117,39 @@ export const executeProxiedRequest = async (
     if (onStatusUpdate) onStatusUpdate('Processing...');
   }
   
-  // 2. Prepare Token Candidates List (The Hybrid Strategy)
+  // 2. Prepare Token Candidates List (The ROBUST Hybrid Strategy)
   let candidates: TokenCandidate[] = [];
+  const usedTokens = new Set<string>();
 
+  // Priority 1: Specific Token (e.g. from Upload step) - ALWAYS try this first if provided
   if (specificToken) {
-      // Case A: Specific token requested (e.g. Health Check)
       candidates.push({ token: specificToken, source: 'Specific' });
-  } else {
-      // Case B: Standard Request (Hybrid Strategy)
-      
-      // Priority 1: Get Shared Pool
-      const sharedTokens = getSharedTokensFromSession();
-      if (sharedTokens.length > 0) {
-          // Shuffle and pick up to 5 random tokens from the pool to distribute load
-          const shuffled = [...sharedTokens].sort(() => 0.5 - Math.random()).slice(0, 5);
-          candidates.push(...shuffled.map(t => ({ token: t.token, source: 'Pool' as const })));
-      }
+      usedTokens.add(specificToken);
+  }
 
-      // Priority 2: Add Personal Token as a fallback at the end
-      const personal = getPersonalToken();
-      if (personal) {
-          // Only add if not already in the list (dedupe)
-          if (!candidates.find(c => c.token === personal.token)) {
-              candidates.push({ token: personal.token, source: 'Personal' });
+  // Priority 2: Shared Pool (Load them even if specificToken exists, as backup!)
+  const sharedTokens = getSharedTokensFromSession();
+  if (sharedTokens.length > 0) {
+      // Shuffle entire pool to maximize randomness and load balancing
+      const shuffled = [...sharedTokens].sort(() => 0.5 - Math.random());
+      
+      // Take up to 10 tokens as candidates to prevent excessively long loops, 
+      // but ensuring we have plenty of backups.
+      const backupCandidates = shuffled.slice(0, 10);
+
+      backupCandidates.forEach(t => {
+          // Only add if not already added (as specific token)
+          if (!usedTokens.has(t.token)) {
+              candidates.push({ token: t.token, source: 'Pool' });
+              usedTokens.add(t.token);
           }
-      }
+      });
+  }
+
+  // Priority 3: Personal Token (Ultimate Fallback)
+  const personal = getPersonalToken();
+  if (personal && !usedTokens.has(personal.token)) {
+      candidates.push({ token: personal.token, source: 'Personal' });
   }
 
   if (candidates.length === 0) {
@@ -152,6 +160,7 @@ export const executeProxiedRequest = async (
   let lastError: any = new Error("Unknown error");
 
   // 3. Execute Retry Loop (Silent Failover)
+  // Loop through ALL candidates until one works
   for (let i = 0; i < candidates.length; i++) {
       const candidate = candidates[i];
       const isLastAttempt = i === candidates.length - 1;
@@ -161,7 +170,7 @@ export const executeProxiedRequest = async (
           const endpoint = `${baseUrl}/api/${serviceType}${relativePath}`;
           
           if (onStatusUpdate) {
-              // Don't show tech details to user in UI, but log to console
+              // Log to console for debugging, show generic status to user
               console.log(`[API Client] Attempt ${i + 1}/${candidates.length} using ${candidate.source} token (...${candidate.token.slice(-6)})`);
           }
 
