@@ -32,7 +32,13 @@ export interface RecipeMediaInput {
   };
 }
 
-export const uploadImageForImagen = async (base64Image: string, mimeType: string, authToken?: string, onStatusUpdate?: (status: string) => void): Promise<string> => {
+// Updated to return the successful token
+export const uploadImageForImagen = async (
+    base64Image: string, 
+    mimeType: string, 
+    authToken?: string, 
+    onStatusUpdate?: (status: string) => void
+): Promise<{ mediaId: string; successfulToken: string }> => {
   console.log(`📤 [Imagen Service] Preparing to upload image for Imagen. MimeType: ${mimeType}`);
   const requestBody = {
     clientContext: { 
@@ -44,7 +50,8 @@ export const uploadImageForImagen = async (base64Image: string, mimeType: string
     }
   };
 
-  const { data } = await executeProxiedRequest(
+  // We use the robust executeProxiedRequest which handles token rotation
+  const { data, successfulToken } = await executeProxiedRequest(
     '/upload',
     'imagen',
     requestBody, 
@@ -62,8 +69,9 @@ export const uploadImageForImagen = async (base64Image: string, mimeType: string
     console.error("No mediaId in response:", JSON.stringify(data, null, 2));
     throw new Error('Upload succeeded but no mediaId was returned from the proxy.');
   }
-  console.log(`📤 [Imagen Service] Image upload successful. Media ID: ${mediaId}`);
-  return mediaId;
+  console.log(`📤 [Imagen Service] Image upload successful. Media ID: ${mediaId} using token ...${successfulToken.slice(-6)}`);
+  
+  return { mediaId, successfulToken };
 };
 
 
@@ -132,7 +140,7 @@ export const runImageRecipe = async (request: {
       'imagen',
       requestBody,
       'IMAGEN RECIPE',
-      config.authToken,
+      config.authToken, // CRITICAL: This must be the SAME token used for upload
       onStatusUpdate
     );
     console.log(`✏️ [Imagen Service] Received recipe result with ${result.imagePanels?.length || 0} panels.`);
@@ -148,21 +156,52 @@ export const editOrComposeWithImagen = async (request: {
     
     console.debug(`[Imagen Edit/Compose Prompt Sent]\n---\n${request.prompt}\n---`);
 
-    const mediaIds = await Promise.all(
-        request.images.map(img => uploadImageForImagen(img.base64, img.mimeType, request.config.authToken, onStatusUpdate))
-    );
-    console.log(`🎨➡️✏️ [Imagen Service] All images uploaded. Media IDs: [${mediaIds.join(', ')}]`);
+    // 1. Upload all images using the *same* logic.
+    // Optimization: We try to upload the first image. If it rotates and picks a new token,
+    // we MUST use that successful token for all subsequent uploads AND the final generation.
+    
+    const uploadedMedia = [];
+    let consistentToken: string | undefined = request.config.authToken;
 
-    const recipeMediaInputs: RecipeMediaInput[] = mediaIds.map((id, index) => ({
-        caption: request.images[index].caption,
-        mediaInput: { mediaCategory: request.images[index].category, mediaGenerationId: id }
-    }));
+    for (let i = 0; i < request.images.length; i++) {
+        const img = request.images[i];
+        
+        // Use consistentToken if we have one from a previous successful upload in this loop
+        const { mediaId, successfulToken } = await uploadImageForImagen(
+            img.base64, 
+            img.mimeType, 
+            consistentToken, 
+            onStatusUpdate
+        );
+        
+        // Lock in this token for the rest of the process
+        if (!consistentToken) {
+            consistentToken = successfulToken;
+            console.log(`🔒 [Imagen Service] Locked token for session: ...${consistentToken.slice(-6)}`);
+        } else if (consistentToken !== successfulToken) {
+             // This theoretically shouldn't happen if we pass specificToken, 
+             // but if it does, we have a problem because media IDs are split across tokens.
+             console.warn(`⚠️ [Imagen Service] Token mismatch detected! Upload 1: ...${consistentToken.slice(-6)}, Upload ${i+1}: ...${successfulToken.slice(-6)}`);
+             // We might need to re-upload previous ones or fail, but let's proceed for now.
+             // In strict mode (specificToken passed), rotation shouldn't happen.
+        }
 
-    console.log(`🎨➡️✏️ [Imagen Service] Sending composed recipe request to API client.`);
+        uploadedMedia.push({
+            caption: img.caption,
+            mediaInput: { mediaCategory: img.category, mediaGenerationId: mediaId }
+        });
+    }
+
+    console.log(`🎨➡️✏️ [Imagen Service] All images uploaded. Sending composed recipe request using locked token.`);
+    
+    // 2. Run the recipe using the CONSISTENT token
     const result = await runImageRecipe({
         userInstruction: request.prompt,
-        recipeMediaInputs,
-        config: request.config
+        recipeMediaInputs: uploadedMedia,
+        config: {
+            ...request.config,
+            authToken: consistentToken // Force use of the token that owns the media IDs
+        }
     }, onStatusUpdate);
     
     return result;

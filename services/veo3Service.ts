@@ -67,12 +67,14 @@ export const generateVideoWithVeo3 = async (
     ? (isImageToVideo ? 'VEO I2V HEALTH CHECK' : 'VEO T2V HEALTH CHECK')
     : (isImageToVideo ? 'VEO I2V GENERATE' : 'VEO T2V GENERATE');
   
+  // If this is an I2V request, we MUST use the token that was used to upload the image (config.authToken).
+  // executeProxiedRequest handles this via the `specificToken` param.
   const { data, successfulToken } = await executeProxiedRequest(
     relativePath,
     'veo',
     requestBody,
     logContext,
-    config.authToken,
+    config.authToken, 
     onStatusUpdate
   );
   console.log('🎬 [VEO Service] Received operations from API client:', data.operations?.length || 0);
@@ -88,7 +90,7 @@ export const checkVideoStatus = async (operations: any[], token: string, onStatu
     'veo',
     payload,
     'VEO STATUS',
-    token,
+    token, // Must use same token as generation
     onStatusUpdate
   );
   
@@ -136,7 +138,7 @@ export const uploadImageForVeo3 = async (
     'veo',
     requestBody,
     'VEO UPLOAD',
-    undefined, // Use personal token for upload
+    undefined, // Let it use the robust logic to find a working token initially
     onStatusUpdate
   );
 
@@ -147,6 +149,6 @@ export const uploadImageForVeo3 = async (
     throw new Error('Upload succeeded but no mediaId returned');
   }
   
-  console.log(`📤 [VEO Service] Image upload successful. Media ID: ${mediaId}`);
+  console.log(`📤 [VEO Service] Image upload successful. Media ID: ${mediaId} with token ...${successfulToken.slice(-6)}`);
   return { mediaId, successfulToken };
 };

@@ -206,6 +206,7 @@ export const generateVideo = async (
         
         if (processedImage) {
             addLogEntry({ model, prompt: "Uploading reference image...", output: "In progress...", tokenCount: 0, status: "Success" });
+            // UPDATED: Capture the successful token from the upload process
             const uploadResult = await uploadImageForVeo3(processedImage.imageBytes, processedImage.mimeType, aspectRatioForVeo3, onStatusUpdate);
             imageMediaId = uploadResult.mediaId;
             successfulToken = uploadResult.successfulToken;
@@ -215,13 +216,15 @@ export const generateVideo = async (
         
         addLogEntry({ model, prompt, output: "Starting video generation via proxy...", tokenCount: 0, status: "Success" });
         console.debug(`[Video Prompt Sent]\n---\n${prompt}\n---`);
+        
+        // UPDATED: Pass the captured token to ensure session consistency
         const { operations: initialOperations, successfulToken: generationToken } = await generateVideoWithVeo3({
             prompt,
             imageMediaId,
             config: {
                 aspectRatio: aspectRatioForVeo3,
                 useStandardModel,
-                authToken: successfulToken || undefined, // Pass the same token used for upload
+                authToken: successfulToken || undefined, 
             },
         }, onStatusUpdate);
 
@@ -244,6 +247,7 @@ export const generateVideo = async (
             await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
             addLogEntry({ model, prompt, output: `Checking video status...`, tokenCount: 0, status: "Success" });
 
+            // UPDATED: Check status using the SAME token
             const statusResponse = await checkVideoStatus(finalOperations, videoCreationToken, onStatusUpdate);
             if (!statusResponse?.operations || statusResponse.operations.length === 0) {
                 console.warn('⚠️ Empty status response, retrying...');
@@ -253,6 +257,12 @@ export const generateVideo = async (
             finalOperations = statusResponse.operations;
             const opStatus = finalOperations[0];
             
+            // FIX: Added strict check for FAILED status string
+            if (opStatus.status === 'MEDIA_GENERATION_STATUS_FAILED') {
+                console.error('❌ Video generation failed with status FAILED. Full operation object:', JSON.stringify(opStatus, null, 2));
+                throw new Error("Video generation failed on the server. This often happens if your request was blocked by safety policies. Please try modifying your prompt or using a different image.");
+            }
+
             const isCompleted = opStatus.done === true || ['MEDIA_GENERATION_STATUS_COMPLETED', 'MEDIA_GENERATION_STATUS_SUCCESS', 'MEDIA_GENERATION_STATUS_SUCCESSFUL'].includes(opStatus.status);
 
             if (isCompleted) {
@@ -273,9 +283,6 @@ export const generateVideo = async (
                 }
             } else if (opStatus.error) {
                 throw new Error(`Video generation failed: ${opStatus.error.message || opStatus.error.code || 'Unknown error'}`);
-            } else if (opStatus.status === 'MEDIA_GENERATION_STATUS_FAILED') {
-                console.error('❌ Video generation failed with status FAILED. Full operation object:', JSON.stringify(opStatus, null, 2));
-                throw new Error("Video generation failed on the server. This often happens if your request was blocked by safety policies. Please try modifying your prompt or using a different image.");
             }
         }
         
