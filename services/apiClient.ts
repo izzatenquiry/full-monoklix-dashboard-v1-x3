@@ -47,7 +47,11 @@ const getSharedTokensFromSession = (): { token: string; createdAt: string }[] =>
         const tokensJSON = sessionStorage.getItem('veoAuthTokens');
         if (tokensJSON) {
             const parsed = JSON.parse(tokensJSON);
-            if (Array.isArray(parsed)) return parsed;
+            if (Array.isArray(parsed)) {
+                // Sort by createdAt descending (newest first) to prioritize fresh tokens
+                // Note: createdAt is expected to be an ISO string
+                return parsed.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            }
         }
     } catch (e) {
         console.warn("Failed to parse shared tokens from session:", e);
@@ -136,12 +140,19 @@ export const executeProxiedRequest = async (
   // CRITICAL LOGIC: We ONLY add backup tokens if this is NOT a health check.
   // If it IS a health check, we want to fail accurately if the specific token is bad.
   if (!isHealthCheck) {
-      const sharedTokens = getSharedTokensFromSession();
-      if (sharedTokens.length > 0) {
-          // Shuffle and pick up to 5 random tokens from the pool to distribute load
-          const shuffled = [...sharedTokens].sort(() => 0.5 - Math.random()).slice(0, 5);
+      const allSharedTokens = getSharedTokensFromSession();
+      
+      if (allSharedTokens.length > 0) {
+          // Step 1: Take only the top 10 NEWEST tokens (Pool Freshness)
+          const freshPool = allSharedTokens.slice(0, 10);
           
-          shuffled.forEach(t => {
+          // Step 2: Randomize selection from this fresh pool (Load Balancing)
+          const shuffledFreshPool = [...freshPool].sort(() => 0.5 - Math.random());
+          
+          // Step 3: Take top 5 random ones for this specific request
+          const selectedCandidates = shuffledFreshPool.slice(0, 5);
+          
+          selectedCandidates.forEach(t => {
               if (!usedTokens.has(t.token)) {
                   candidates.push({ token: t.token, source: 'Pool' });
                   usedTokens.add(t.token);
