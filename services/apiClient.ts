@@ -2,6 +2,14 @@ import { addLogEntry } from './aiLogService';
 import { type User } from '../types';
 import { supabase } from './supabaseClient';
 
+// Default fallback servers if session is empty
+const FALLBACK_SERVERS = [
+    'https://s1.monoklix.com', 'https://s2.monoklix.com', 'https://s3.monoklix.com',
+    'https://s4.monoklix.com', 'https://s5.monoklix.com', 'https://s6.monoklix.com',
+    'https://s7.monoklix.com', 'https://s8.monoklix.com', 'https://s9.monoklix.com',
+    'https://s10.monoklix.com'
+];
+
 export const getVeoProxyUrl = (): string => {
   if (window.location.hostname === 'localhost') {
     return 'http://localhost:3001';
@@ -10,8 +18,8 @@ export const getVeoProxyUrl = (): string => {
   if (userSelectedProxy) {
       return userSelectedProxy;
   }
-  const fallbackUrl = 'https://veox.monoklix.com';
-  return fallbackUrl;
+  // Default if nothing selected
+  return 'https://veox.monoklix.com';
 };
 
 export const getImagenProxyUrl = (): string => {
@@ -22,8 +30,7 @@ export const getImagenProxyUrl = (): string => {
   if (userSelectedProxy) {
       return userSelectedProxy;
   }
-  const fallbackUrl = 'https://gemx.monoklix.com';
-  return fallbackUrl;
+  return 'https://gemx.monoklix.com';
 };
 
 const getPersonalToken = (): { token: string; createdAt: string; } | null => {
@@ -41,15 +48,14 @@ const getPersonalToken = (): { token: string; createdAt: string; } | null => {
     return null;
 };
 
-// Helper to get tokens from the shared pool without importing userService (to avoid circular dependency)
+// Helper to get tokens from the shared pool
 const getSharedTokensFromSession = (): { token: string; createdAt: string }[] => {
     try {
         const tokensJSON = sessionStorage.getItem('veoAuthTokens');
         if (tokensJSON) {
             const parsed = JSON.parse(tokensJSON);
             if (Array.isArray(parsed)) {
-                // Sort by createdAt descending (newest first) to prioritize fresh tokens
-                // Note: createdAt is expected to be an ISO string
+                // Sort by newest first
                 return parsed.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
             }
         }
@@ -74,9 +80,12 @@ const getCurrentUserInternal = (): User | null => {
     return null;
 };
 
-interface TokenCandidate {
+// --- EXECUTE REQUEST WITH ROBUST FAILOVER ---
+
+interface RequestAttempt {
     token: string;
-    source: 'Specific' | 'Pool' | 'Personal';
+    serverUrl: string;
+    source: 'Specific' | 'Personal' | 'Pool';
 }
 
 export const executeProxiedRequest = async (
@@ -89,175 +98,170 @@ export const executeProxiedRequest = async (
 ): Promise<{ data: any; successfulToken: string }> => {
   console.log(`[API Client] Starting process for: ${logContext}`);
   
-  // Determine if this is a strict health check or a robust generation request
-  const isHealthCheck = logContext.includes('HEALTH CHECK');
-
   // 1. Acquire Server Slot (Rate Limiting at Server Level)
-  // Skip slot acquisition for simple health checks to avoid clogging the queue with tests
   const isGenerationRequest = logContext.includes('GENERATE') || logContext.includes('RECIPE');
-  
+  const currentServerUrl = serviceType === 'veo' ? getVeoProxyUrl() : getImagenProxyUrl();
+
   if (isGenerationRequest) {
-    if (onStatusUpdate) onStatusUpdate('All slots are in use. You are in the queue...');
+    if (onStatusUpdate) onStatusUpdate('Queueing...');
     
-    const serverUrl = serviceType === 'veo' ? getVeoProxyUrl() : getImagenProxyUrl();
-
-    let slotAcquired = false;
-    // Try up to 3 times to get a slot to avoid infinite hangs
-    for (let i = 0; i < 3; i++) {
-        const { data: acquired, error } = await supabase.rpc('request_generation_slot', { 
-            cooldown_seconds: 10,
-            server_url: serverUrl
-        });
-
-        if (error) {
-            console.error('Error requesting generation slot:', error);
-            // Continue anyway, don't block user for DB stats error
-            slotAcquired = true; 
-            break;
-        }
-        if (acquired) {
-            slotAcquired = true;
-            break;
-        } else {
-            if (onStatusUpdate) onStatusUpdate(`Queue position ${i+1}... waiting...`);
-            await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-    }
+    // Simple slot check - we don't want to block robust failover logic too much
+    // so we just try to acquire once on the primary server.
+    await supabase.rpc('request_generation_slot', { 
+        cooldown_seconds: 10,
+        server_url: currentServerUrl
+    });
+    
     if (onStatusUpdate) onStatusUpdate('Processing...');
   }
   
-  // 2. Prepare Token Candidates List
-  let candidates: TokenCandidate[] = [];
-  const usedTokens = new Set<string>();
+  // 2. Build Attempt Strategy List
+  let attempts: RequestAttempt[] = [];
 
-  // Priority 1: Specific Token (e.g. from Upload step or Health Check)
   if (specificToken) {
-      candidates.push({ token: specificToken, source: 'Specific' });
-      usedTokens.add(specificToken);
-  }
-
-  // Priority 2: Shared Pool & Personal Token (Failover)
-  // CRITICAL LOGIC: We ONLY add backup tokens if this is NOT a health check.
-  // If it IS a health check, we want to fail accurately if the specific token is bad.
-  if (!isHealthCheck) {
-      const allSharedTokens = getSharedTokensFromSession();
+      // SCENARIO A: Specific Token (e.g. Health Check, Master Dashboard, or continuing a flow)
+      // Strict mode: Only try exactly what was requested. No failover.
+      attempts.push({ token: specificToken, serverUrl: currentServerUrl, source: 'Specific' });
+  } else {
+      // SCENARIO B: Robust User Generation (The "Bulletproof" Logic)
       
-      if (allSharedTokens.length > 0) {
-          // Step 1: Take only the top 10 NEWEST tokens (Pool Freshness)
-          const freshPool = allSharedTokens.slice(0, 10);
+      const personal = getPersonalToken();
+      const poolTokens = getSharedTokensFromSession();
+      // Pick top 5 newest tokens for pool attempts
+      const activePool = poolTokens.slice(0, 5); 
+
+      // --- PHASE 1: Try on Current Server ---
+      
+      // 1.1 Personal Token (Priority)
+      if (personal) {
+          attempts.push({ token: personal.token, serverUrl: currentServerUrl, source: 'Personal' });
+      }
+
+      // 1.2 Shared Pool (Hybrid Fallback)
+      // Shuffle the top 5 to distribute load
+      const shuffledPool = [...activePool].sort(() => 0.5 - Math.random());
+      shuffledPool.forEach(t => {
+          // Don't add if same as personal
+          if (personal?.token !== t.token) {
+              attempts.push({ token: t.token, serverUrl: currentServerUrl, source: 'Pool' });
+          }
+      });
+
+      // --- PHASE 2: Try on Backup Server (If Phase 1 fails due to IP/Server issues) ---
+      // Pick a random server that is NOT the current one
+      const otherServers = FALLBACK_SERVERS.filter(s => !currentServerUrl.includes(s));
+      if (otherServers.length > 0) {
+          const backupServer = otherServers[Math.floor(Math.random() * otherServers.length)];
           
-          // Step 2: Randomize selection from this fresh pool (Load Balancing)
-          const shuffledFreshPool = [...freshPool].sort(() => 0.5 - Math.random());
+          // 2.1 Retry Personal on Backup Server
+          if (personal) {
+              attempts.push({ token: personal.token, serverUrl: backupServer, source: 'Personal' });
+          }
           
-          // Step 3: Take top 5 random ones for this specific request
-          const selectedCandidates = shuffledFreshPool.slice(0, 5);
-          
-          selectedCandidates.forEach(t => {
-              if (!usedTokens.has(t.token)) {
-                  candidates.push({ token: t.token, source: 'Pool' });
-                  usedTokens.add(t.token);
-              }
+          // 2.2 Retry Pool on Backup Server (Pick just 2 random ones to save time)
+          shuffledPool.slice(0, 2).forEach(t => {
+               if (personal?.token !== t.token) {
+                  attempts.push({ token: t.token, serverUrl: backupServer, source: 'Pool' });
+               }
           });
       }
-
-      const personal = getPersonalToken();
-      if (personal && !usedTokens.has(personal.token)) {
-          candidates.push({ token: personal.token, source: 'Personal' });
-      }
   }
 
-  if (candidates.length === 0) {
-      throw new Error(`No authentication tokens available. Please refresh the page or contact admin.`);
+  if (attempts.length === 0) {
+      throw new Error(`No authentication tokens found. Please claim a token in Settings.`);
   }
 
   const currentUser = getCurrentUserInternal();
   let lastError: any = new Error("Unknown error");
 
-  // 3. Execute Retry Loop
-  for (let i = 0; i < candidates.length; i++) {
-      const candidate = candidates[i];
-      const isLastAttempt = i === candidates.length - 1;
+  // 3. Execute the Strategy Loop
+  for (let i = 0; i < attempts.length; i++) {
+      const attempt = attempts[i];
+      const isLastAttempt = i === attempts.length - 1;
       
       try {
-          const baseUrl = serviceType === 'veo' ? getVeoProxyUrl() : getImagenProxyUrl();
-          const endpoint = `${baseUrl}/api/${serviceType}${relativePath}`;
+          // Construct endpoint based on the specific server in this attempt
+          const endpoint = `${attempt.serverUrl}/api/${serviceType}${relativePath}`;
           
           if (onStatusUpdate) {
-              console.log(`[API Client] Attempt ${i + 1}/${candidates.length} using ${candidate.source} token (...${candidate.token.slice(-6)})`);
+             // User-friendly status update
+             if (attempt.source === 'Personal') onStatusUpdate('Trying Personal Key...');
+             else if (attempt.source === 'Pool') onStatusUpdate('Optimizing connection...'); // "Smart Hybrid" disguise
           }
+
+          console.log(`[API Client] Attempt ${i + 1}/${attempts.length} | ${attempt.source} Token | Server: ${attempt.serverUrl}`);
 
           const response = await fetch(endpoint, {
               method: 'POST',
               headers: {
                   'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${candidate.token}`,
+                  'Authorization': `Bearer ${attempt.token}`,
                   'x-user-username': currentUser?.username || 'unknown',
               },
               body: JSON.stringify(requestBody),
           });
 
-          // Handle JSON parsing separately to catch non-JSON proxy errors
           let data;
           const textResponse = await response.text();
           try {
               data = JSON.parse(textResponse);
           } catch {
-              data = { error: { message: `Proxy returned non-JSON (${response.status}): ${textResponse.substring(0, 100)}` } };
+              data = { error: { message: `Proxy returned non-JSON (${response.status})` } };
           }
 
           if (!response.ok) {
               const status = response.status;
               const errorMessage = data.error?.message || data.message || `API call failed (${status})`;
+              const lowerMsg = errorMessage.toLowerCase();
 
-              // CRITICAL: If it's a 400 error (Bad Request), it's likely a prompt issue (Safety Filter).
-              // Retrying with a different token WON'T fix this. Fail immediately to tell user.
-              if (status === 400) {
-                  console.warn(`[API Client] 400 Bad Request (likely Safety). Not retrying.`);
+              // CRITICAL STOP CONDITIONS (Don't Retry)
+              // 1. 400 Bad Request (Safety Filters, Invalid Prompts)
+              if (status === 400 || lowerMsg.includes('safety') || lowerMsg.includes('blocked')) {
+                  console.warn(`[API Client] 🛑 Non-retriable error (${status}). Prompt issue.`);
                   throw new Error(errorMessage);
               }
 
-              console.warn(`[API Client] Attempt ${i + 1} failed (${status}): ${errorMessage}`);
+              // RETRY CONDITIONS
+              // 429 (Quota), 401 (Expired Token), 5xx (Server Error), Fetch Error
+              console.warn(`[API Client] ⚠️ Attempt ${i + 1} failed (${status}). trying next...`);
               
               if (isLastAttempt) {
-                  throw new Error(errorMessage); // No more tokens, throw the error up
+                  throw new Error(errorMessage);
               }
-              
-              // Continue to next loop iteration (Silent Retry)
-              continue;
+              continue; // Try next strategy
           }
 
-          // Success!
-          console.log(`✅ [API Client] Success with ${candidate.source} token.`);
-          return { data, successfulToken: candidate.token };
+          // SUCCESS
+          console.log(`✅ [API Client] Success using ${attempt.source} token on ${attempt.serverUrl}`);
+          
+          // If we successfully used a backup server, maybe we should silently update the user's preference?
+          // For now, let's just return the success.
+          return { data, successfulToken: attempt.token };
 
       } catch (error) {
           lastError = error;
           
-          // If it was a Safety Error (400) explicitly thrown above, stop retrying.
-          if (error instanceof Error && (error.message.includes('400') || error.message.toLowerCase().includes('safety'))) {
+          // Re-throw safety/400 errors immediately
+          const errMsg = error instanceof Error ? error.message : String(error);
+          if (errMsg.includes('400') || errMsg.toLowerCase().includes('safety')) {
               throw error;
           }
 
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          
-          // Network errors (fetch failed) - Try next token/server logic
           if (isLastAttempt) {
-              console.error(`❌ [API Client] All ${candidates.length} attempts failed.`);
+              console.error(`❌ [API Client] All ${attempts.length} attempts exhausted.`);
               
-              // Only log generic errors to history if it's NOT a health check (avoid spam)
-              if (!isHealthCheck) {
+              // Only log to history if it's a real user generation attempt
+              if (!specificToken) {
                   addLogEntry({ 
                       model: logContext, 
-                      prompt: `Request failed after ${candidates.length} attempts`, 
-                      output: errorMessage, 
+                      prompt: `Failed after ${attempts.length} attempts`, 
+                      output: errMsg, 
                       tokenCount: 0, 
                       status: 'Error', 
-                      error: errorMessage 
+                      error: errMsg 
                   });
               }
               throw lastError;
-          } else {
-              console.warn(`[API Client] Exception on attempt ${i + 1}: ${errorMessage}. Retrying...`);
           }
       }
   }
