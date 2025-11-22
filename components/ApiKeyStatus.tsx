@@ -19,7 +19,7 @@ interface TokenSelectionModalProps {
 
 const TokenSelectionModal: React.FC<TokenSelectionModalProps> = ({ isOpen, onClose, currentUser, onUserUpdate, assignTokenProcess, language }) => {
     const [tokens, setTokens] = useState<{ token: string; createdAt: string }[]>([]);
-    // Updated state to store individual service results
+    // State to store individual service results for each token
     const [testResults, setTestResults] = useState<Map<string, { status: 'idle' | 'testing' | 'complete', results?: TokenTestResult[] }>>(new Map());
     const [claimingToken, setClaimingToken] = useState<string | null>(null);
     const [isAutoAssigning, setIsAutoAssigning] = useState(false);
@@ -43,7 +43,8 @@ const TokenSelectionModal: React.FC<TokenSelectionModalProps> = ({ isOpen, onClo
         setTestResults(prev => new Map(prev).set(token, { status: 'testing' }));
         
         try {
-            // This runs individual tests for Imagen and Veo without retry logic
+            // This runs individual tests for Imagen and Veo specifically for this token
+            // Because we updated apiClient.ts, this will NOT retry with other tokens if it fails.
             const results = await runComprehensiveTokenTest(token);
             
             setTestResults(prev => new Map(prev).set(token, { 
@@ -66,12 +67,14 @@ const TokenSelectionModal: React.FC<TokenSelectionModalProps> = ({ isOpen, onClo
         
         const result = await assignPersonalTokenAndIncrementUsage(currentUser.id, token);
         
+        setClaimingToken(null); // Stop spinner regardless of result
+
         if (result.success) {
             onUserUpdate(result.user);
+            // Close modal after a short delay to show the success tick
             setTimeout(onClose, 1000);
         } else {
             alert(`Failed to claim: ${result.message}`);
-            setClaimingToken(null);
         }
     };
 
@@ -142,7 +145,7 @@ const TokenSelectionModal: React.FC<TokenSelectionModalProps> = ({ isOpen, onClo
                             const veoResult = results?.find(r => r.service === 'Veo');
                             
                             // Determine overall success for enabling the claim button
-                            const isClaimable = results?.every(r => r.success) || false;
+                            const isClaimable = results?.some(r => r.success) || false;
 
                             return (
                                 <div key={idx} className={`p-3 rounded-xl border transition-all ${isCurrent ? 'bg-green-50 border-green-500 dark:bg-green-900/20' : 'bg-neutral-50 dark:bg-neutral-800/50 border-neutral-200 dark:border-neutral-700'}`}>
@@ -164,15 +167,22 @@ const TokenSelectionModal: React.FC<TokenSelectionModalProps> = ({ isOpen, onClo
                                             </button>
                                             <button 
                                                 onClick={() => handleClaimToken(t.token)}
-                                                disabled={isCurrent || claimingToken !== null || !isClaimable} 
-                                                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors text-white flex items-center gap-1.5 ${isCurrent ? 'bg-green-600 opacity-50 cursor-default' : isClaimable ? 'bg-green-600 hover:bg-green-700 shadow-md hover:scale-105' : 'bg-neutral-400 cursor-not-allowed opacity-50'}`}
+                                                disabled={isCurrent || claimingToken !== null || (status !== 'idle' && !isClaimable)} 
+                                                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors text-white flex items-center justify-center gap-1.5 min-w-[80px] ${isCurrent ? 'bg-green-600 opacity-100 shadow-md' : isClaimable ? 'bg-green-600 hover:bg-green-700 shadow-md hover:scale-105' : 'bg-neutral-400 hover:bg-neutral-500'}`}
+                                                title={!isClaimable && status !== 'idle' ? "Token failed validation" : "Claim this token"}
                                             >
-                                                {claimingToken === t.token ? <Spinner/> : isCurrent ? 'Claimed' : 'Claim'}
+                                                {isCurrent ? (
+                                                    <CheckCircleIcon className="w-4 h-4 text-white" />
+                                                ) : claimingToken === t.token ? (
+                                                    <Spinner/> 
+                                                ) : (
+                                                    'Claim'
+                                                )}
                                             </button>
                                         </div>
                                     </div>
 
-                                    {/* Status Indicators */}
+                                    {/* Status Indicators - No Spinners here, just icons/text */}
                                     <div className="grid grid-cols-2 gap-2">
                                         {/* Imagen Status */}
                                         <div className={`flex items-center justify-between p-2 rounded-lg border ${imagenResult ? (imagenResult.success ? 'bg-green-100/50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : 'bg-red-100/50 border-red-200 dark:bg-red-900/20 dark:border-red-800') : 'bg-neutral-100 dark:bg-neutral-800 border-transparent'}`}>
@@ -180,9 +190,13 @@ const TokenSelectionModal: React.FC<TokenSelectionModalProps> = ({ isOpen, onClo
                                                 <ImageIcon className="w-4 h-4 opacity-70"/>
                                                 <span className="text-xs font-medium">Imagen</span>
                                             </div>
-                                            {status === 'testing' ? <Spinner/> : imagenResult ? (
+                                            {status === 'testing' ? (
+                                                <span className="text-[10px] text-neutral-500 animate-pulse">Checking...</span>
+                                            ) : imagenResult ? (
                                                 imagenResult.success ? <CheckCircleIcon className="w-4 h-4 text-green-600"/> : <XIcon className="w-4 h-4 text-red-500"/>
-                                            ) : <span className="text-[10px] text-neutral-400">Untested</span>}
+                                            ) : (
+                                                <span className="text-[10px] text-neutral-400">Untested</span>
+                                            )}
                                         </div>
 
                                         {/* Veo Status */}
@@ -191,9 +205,13 @@ const TokenSelectionModal: React.FC<TokenSelectionModalProps> = ({ isOpen, onClo
                                                 <VideoIcon className="w-4 h-4 opacity-70"/>
                                                 <span className="text-xs font-medium">Veo 3</span>
                                             </div>
-                                            {status === 'testing' ? <Spinner/> : veoResult ? (
+                                            {status === 'testing' ? (
+                                                <span className="text-[10px] text-neutral-500 animate-pulse">Checking...</span>
+                                            ) : veoResult ? (
                                                 veoResult.success ? <CheckCircleIcon className="w-4 h-4 text-green-600"/> : <XIcon className="w-4 h-4 text-red-500"/>
-                                            ) : <span className="text-[10px] text-neutral-400">Untested</span>}
+                                            ) : (
+                                                <span className="text-[10px] text-neutral-400">Untested</span>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
