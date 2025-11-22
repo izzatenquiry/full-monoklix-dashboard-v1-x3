@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MONOklix.com - All-in-One AI Platform</title>
+    <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="%230ea5e9"/><path d="M6 24V8h5l3 7 3-7h5v16h-4V12l-4 8-4-8v12H6z" fill="white"/></svg>'>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0ea5e9">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              primary: tailwind.colors.sky,
+              neutral: tailwind.colors.slate,
+            },
+            keyframes: {
+              zoomIn: {
+                '0%': { opacity: '0', transform: 'scale(0.95)' },
+                '100%': { opacity: '1', transform: 'scale(1)' },
+              },
+              reverseSpin: {
+                'from': { transform: 'rotate(360deg)' },
+                'to': { transform: 'rotate(0deg)' },
+              },
+            },
+            animation: {
+              zoomIn: 'zoomIn 0.5s cubic-bezier(0.25, 1, 0.5, 1) forwards',
+              'reverse-spin': 'reverseSpin 1s linear infinite',
+            },
+            transitionTimingFunction: {
+              'custom-ease': 'cubic-bezier(0.4, 0, 0.2, 1)',
+            }
+          }
+        }
+      }
+    </script>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@19.1.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@19.1.1/",
+    "react/": "https://aistudiocdn.com/react@19.1.1/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@1.19.0",
+    "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/+esm",
+    "@jest/globals": "https://aistudiocdn.com/@jest/globals@30.1.2",
+    "path": "https://aistudiocdn.com/path@0.12.7",
+    "vite": "https://aistudiocdn.com/vite@7.1.7",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/vitejs/plugin-react@5.0.3",
+    "express": "https://aistudiocdn.com/express@^5.1.0",
+    "cors": "https://aistudiocdn.com/cors@^2.8.5",
+    "node-fetch": "https://aistudiocdn.com/node-fetch@^3.3.2",
+    "dotenv": "https://aistudiocdn.com/dotenv@^17.2.3",
+    "uuid": "https://aistudiocdn.com/uuid@^13.0.0",
+    "localforage": "https://cdn.jsdelivr.net/npm/localforage@1.10.0/+esm"
+  }
+}
+</script>
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.min.js"></script>
+<script src="https://unpkg.com/@ffmpeg/util@0.12.10/dist/umd/util.min.js"></script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-neutral-50 text-neutral-800 dark:bg-neutral-950 dark:text-neutral-200 transition-colors duration-300">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(registration => {
+              console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            })
+            .catch(err => {
+              console.warn('ServiceWorker registration failed: ', err);
+            });
+        });
+      }
+    </script>
+</body>
+</html>
