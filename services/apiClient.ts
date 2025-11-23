@@ -98,73 +98,66 @@ export const executeProxiedRequest = async (
 ): Promise<{ data: any; successfulToken: string }> => {
   console.log(`[API Client] Starting process for: ${logContext}`);
   
-  // 1. Acquire Server Slot (Rate Limiting at Server Level)
-  const isGenerationRequest = logContext.includes('GENERATE') || logContext.includes('RECIPE');
+  const isHealthCheck = logContext.includes('HEALTH CHECK');
   const currentServerUrl = serviceType === 'veo' ? getVeoProxyUrl() : getImagenProxyUrl();
 
+  // 1. Acquire Server Slot (Rate Limiting at Server Level)
+  const isGenerationRequest = logContext.includes('GENERATE') || logContext.includes('RECIPE');
+  
   if (isGenerationRequest) {
     if (onStatusUpdate) onStatusUpdate('Queueing...');
-    
-    // Simple slot check - we don't want to block robust failover logic too much
-    // so we just try to acquire once on the primary server.
-    await supabase.rpc('request_generation_slot', { 
-        cooldown_seconds: 10,
-        server_url: currentServerUrl
-    });
-    
+    await supabase.rpc('request_generation_slot', { cooldown_seconds: 10, server_url: currentServerUrl });
     if (onStatusUpdate) onStatusUpdate('Processing...');
   }
   
   // 2. Build Attempt Strategy List
   let attempts: RequestAttempt[] = [];
+  const usedAttempts = new Set<string>(); // To prevent duplicate token+server pairs
+
+  const addAttempt = (attempt: RequestAttempt) => {
+      const key = `${attempt.token.slice(-6)}@${attempt.serverUrl}`;
+      if (!usedAttempts.has(key)) {
+          attempts.push(attempt);
+          usedAttempts.add(key);
+      }
+  };
 
   if (specificToken) {
-      // SCENARIO A: Specific Token (e.g. Health Check, Master Dashboard, or continuing a flow)
-      // Strict mode: Only try exactly what was requested. No failover.
-      attempts.push({ token: specificToken, serverUrl: currentServerUrl, source: 'Specific' });
+      // SCENARIO A: Strict Mode (Health Check or multi-step process)
+      addAttempt({ token: specificToken, serverUrl: currentServerUrl, source: 'Specific' });
+      // If it's a health check, we stop here. If it's a multi-step process, we add fallbacks.
+      if (!isHealthCheck) {
+          const poolTokens = getSharedTokensFromSession().slice(0, 5); // 5 backups
+          poolTokens.forEach(t => addAttempt({ token: t.token, serverUrl: currentServerUrl, source: 'Pool' }));
+      }
   } else {
       // SCENARIO B: Robust User Generation (The "Bulletproof" Logic)
-      
       const personal = getPersonalToken();
-      const poolTokens = getSharedTokensFromSession();
-      // Pick top 5 newest tokens for pool attempts
-      const activePool = poolTokens.slice(0, 5); 
+      const allSharedTokens = getSharedTokensFromSession();
+      const newestPoolTokens = allSharedTokens.slice(0, 10); // Get 10 newest
+      const shuffledPool = [...newestPoolTokens].sort(() => 0.5 - Math.random()); // Shuffle for load balancing
 
-      // --- PHASE 1: Try on Current Server ---
-      
-      // 1.1 Personal Token (Priority)
+      // PHASE 1: Try on Current Server
       if (personal) {
-          attempts.push({ token: personal.token, serverUrl: currentServerUrl, source: 'Personal' });
+          addAttempt({ token: personal.token, serverUrl: currentServerUrl, source: 'Personal' });
       }
-
-      // 1.2 Shared Pool (Hybrid Fallback)
-      // Shuffle the top 5 to distribute load
-      const shuffledPool = [...activePool].sort(() => 0.5 - Math.random());
       shuffledPool.forEach(t => {
-          // Don't add if same as personal
-          if (personal?.token !== t.token) {
-              attempts.push({ token: t.token, serverUrl: currentServerUrl, source: 'Pool' });
-          }
+          addAttempt({ token: t.token, serverUrl: currentServerUrl, source: 'Pool' });
       });
 
-      // --- PHASE 2: Try on Backup Server (If Phase 1 fails due to IP/Server issues) ---
-      // Pick a random server that is NOT the current one
-      const otherServers = FALLBACK_SERVERS.filter(s => !currentServerUrl.includes(s));
-      if (otherServers.length > 0) {
-          const backupServer = otherServers[Math.floor(Math.random() * otherServers.length)];
-          
-          // 2.1 Retry Personal on Backup Server
+      // PHASE 2: Try on Backup Servers
+      const otherServers = FALLBACK_SERVERS.filter(s => s !== currentServerUrl);
+      const backupServers = [...otherServers].sort(() => 0.5 - Math.random()).slice(0, 2); // Pick 2 random backups
+
+      backupServers.forEach(backupServer => {
           if (personal) {
-              attempts.push({ token: personal.token, serverUrl: backupServer, source: 'Personal' });
+              addAttempt({ token: personal.token, serverUrl: backupServer, source: 'Personal' });
           }
-          
-          // 2.2 Retry Pool on Backup Server (Pick just 2 random ones to save time)
-          shuffledPool.slice(0, 2).forEach(t => {
-               if (personal?.token !== t.token) {
-                  attempts.push({ token: t.token, serverUrl: backupServer, source: 'Pool' });
-               }
+          // Try top 3 from shuffled pool on backup server
+          shuffledPool.slice(0, 3).forEach(t => {
+              addAttempt({ token: t.token, serverUrl: backupServer, source: 'Pool' });
           });
-      }
+      });
   }
 
   if (attempts.length === 0) {
@@ -180,15 +173,7 @@ export const executeProxiedRequest = async (
       const isLastAttempt = i === attempts.length - 1;
       
       try {
-          // Construct endpoint based on the specific server in this attempt
           const endpoint = `${attempt.serverUrl}/api/${serviceType}${relativePath}`;
-          
-          if (onStatusUpdate) {
-             // User-friendly status update
-             if (attempt.source === 'Personal') onStatusUpdate('Trying Personal Key...');
-             else if (attempt.source === 'Pool') onStatusUpdate('Optimizing connection...'); // "Smart Hybrid" disguise
-          }
-
           console.log(`[API Client] Attempt ${i + 1}/${attempts.length} | ${attempt.source} Token | Server: ${attempt.serverUrl}`);
 
           const response = await fetch(endpoint, {
@@ -214,34 +199,21 @@ export const executeProxiedRequest = async (
               const errorMessage = data.error?.message || data.message || `API call failed (${status})`;
               const lowerMsg = errorMessage.toLowerCase();
 
-              // CRITICAL STOP CONDITIONS (Don't Retry)
-              // 1. 400 Bad Request (Safety Filters, Invalid Prompts)
               if (status === 400 || lowerMsg.includes('safety') || lowerMsg.includes('blocked')) {
                   console.warn(`[API Client] 🛑 Non-retriable error (${status}). Prompt issue.`);
                   throw new Error(errorMessage);
               }
 
-              // RETRY CONDITIONS
-              // 429 (Quota), 401 (Expired Token), 5xx (Server Error), Fetch Error
-              console.warn(`[API Client] ⚠️ Attempt ${i + 1} failed (${status}). trying next...`);
-              
-              if (isLastAttempt) {
-                  throw new Error(errorMessage);
-              }
-              continue; // Try next strategy
+              console.warn(`[API Client] ⚠️ Attempt ${i + 1} failed (${status}). Trying next...`);
+              if (isLastAttempt) throw new Error(errorMessage);
+              continue;
           }
 
-          // SUCCESS
           console.log(`✅ [API Client] Success using ${attempt.source} token on ${attempt.serverUrl}`);
-          
-          // If we successfully used a backup server, maybe we should silently update the user's preference?
-          // For now, let's just return the success.
           return { data, successfulToken: attempt.token };
 
       } catch (error) {
           lastError = error;
-          
-          // Re-throw safety/400 errors immediately
           const errMsg = error instanceof Error ? error.message : String(error);
           if (errMsg.includes('400') || errMsg.toLowerCase().includes('safety')) {
               throw error;
@@ -249,8 +221,6 @@ export const executeProxiedRequest = async (
 
           if (isLastAttempt) {
               console.error(`❌ [API Client] All ${attempts.length} attempts exhausted.`);
-              
-              // Only log to history if it's a real user generation attempt
               if (!specificToken) {
                   addLogEntry({ 
                       model: logContext, 
