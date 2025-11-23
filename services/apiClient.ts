@@ -98,7 +98,6 @@ export const executeProxiedRequest = async (
 ): Promise<{ data: any; successfulToken: string }> => {
   console.log(`[API Client] Starting process for: ${logContext}`);
   
-  const isHealthCheck = logContext.includes('HEALTH CHECK');
   const currentServerUrl = serviceType === 'veo' ? getVeoProxyUrl() : getImagenProxyUrl();
 
   // 1. Acquire Server Slot (Rate Limiting at Server Level)
@@ -124,12 +123,10 @@ export const executeProxiedRequest = async (
 
   if (specificToken) {
       // SCENARIO A: Strict Mode (Health Check or multi-step process)
+      // If a specific token is provided, we MUST only use that one.
+      // This is critical for multi-step operations (upload -> generate) where the
+      // media ID is tied to the token session. No failover is possible or desired.
       addAttempt({ token: specificToken, serverUrl: currentServerUrl, source: 'Specific' });
-      // If it's a health check, we stop here. If it's a multi-step process, we add fallbacks.
-      if (!isHealthCheck) {
-          const poolTokens = getSharedTokensFromSession().slice(0, 5); // 5 backups
-          poolTokens.forEach(t => addAttempt({ token: t.token, serverUrl: currentServerUrl, source: 'Pool' }));
-      }
   } else {
       // SCENARIO B: Robust User Generation (The "Bulletproof" Logic)
       const personal = getPersonalToken();
