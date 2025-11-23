@@ -246,6 +246,8 @@ export interface CreativeDirectionState {
   effect: string;
   pose: string;
   creativityLevel: number;
+  // FIX: Add aspectRatio to the creative direction state.
+  aspectRatio: '1:1' | '9:16' | '16:9' | '3:4' | '4:3';
 }
 
 // A function to get the initial state
@@ -260,4 +262,6 @@ export const getInitialCreativeDirectionState = (): CreativeDirectionState => ({
   effect: 'None',
   pose: 'Random',
   creativityLevel: 5,
+  // FIX: Add aspectRatio to the initial state.
+  aspectRatio: '9:16',
 });

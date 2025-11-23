@@ -1,7 +1,7 @@
 import React from 'react';
 import { type View, type NavItem, type User, UserStatus, Language } from '../types';
 import {
-  ImageIcon, VideoIcon, SettingsIcon, BookOpenIcon, LogoutIcon, GalleryIcon, LogoIcon, XIcon, LibraryIcon, FileTextIcon, GraduationCapIcon, TrendingUpIcon, RobotIcon, MegaphoneIcon, DatabaseIcon, WhatsAppIcon, ActivityIcon, SparklesIcon
+  ImageIcon, VideoIcon, SettingsIcon, BookOpenIcon, LogoutIcon, GalleryIcon, LogoIcon, XIcon, LibraryIcon, FileTextIcon, GraduationCapIcon, TrendingUpIcon, RobotIcon, MegaphoneIcon, DatabaseIcon, TelegramIcon, ActivityIcon, SparklesIcon
 } from './Icons';
 import { APP_VERSION } from '../services/appConfig';
 import { getTranslations } from '../services/translations';
@@ -19,7 +19,7 @@ const getNavItems = (language: Language): NavItem[] => {
         { id: 'ai-video-suite', label: T.aiVideo, section: 'free', icon: VideoIcon },
         { id: 'ai-prompt-library-suite', label: T.promptLibrary, section: 'free', icon: LibraryIcon, isNew: true },
         { id: 'gallery', label: T.imageGallery, section: 'free', icon: GalleryIcon },  
-        { id: 'support-group', label: T.supportGroup, section: 'bottom', icon: WhatsAppIcon, isExternal: true, url: 'https://chat.whatsapp.com/' },
+        { id: 'support-group', label: T.supportGroup, section: 'bottom', icon: TelegramIcon, isExternal: true, url: 'https://t.me/+r_PkHl9yRck5NzJl' },
         { id: 'master-dashboard', label: "Server Status", section: 'admin', icon: ActivityIcon, roles: ['admin'] },
         { id: 'settings', label: T.settings, section: 'bottom', icon: SettingsIcon, roles: ['admin', 'user'] },
         { id: 'logout', label: T.logout, section: 'bottom', icon: LogoutIcon }
@@ -64,7 +64,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeView, setActiveView, onLogout, 
                   href={item.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition-colors duration-200 text-left text-sm font-semibold bg-green-500 text-white hover:bg-green-600 shadow-md"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition-colors duration-200 text-left text-sm font-semibold bg-sky-500 text-white hover:bg-sky-600 shadow-md"
                 >
                   <item.icon className="w-5 h-5" />
                   <span>{item.label}</span>

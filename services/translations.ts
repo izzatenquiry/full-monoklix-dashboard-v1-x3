@@ -709,7 +709,7 @@ const translations = {
             tabs: {
                 profile: 'User Profile',
 // FIX: Changed tab label from "Token!" to "Integrations" for clarity.
-                api: 'Integrations',
+                api: 'Token List!',
                 contentAdmin: 'Content Admin',
                 userDb: 'User Database'
             },
@@ -769,9 +769,9 @@ const translations = {
                 authTokenPlaceholder: 'Paste your personal __SESSION token here',
                 save: 'Save',
                 saving: 'Saving...',
-                runTest: 'Run Test',
+                runTest: 'Test',
                 testing: 'Testing...',
-                claimNew: 'Claim New!',
+                claimNew: 'Claim!',
                 updated: 'Updated!',
                 saveFail: 'Save failed.',
                 tokenGroupTitle: 'Veo 3.0 Authentication Pool',
