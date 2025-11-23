@@ -54,8 +54,8 @@ const translations = {
             assigningMessage: 'A valid connection was found. Assigning it to your account...',
             successTitle: 'Connection Secured!',
             successMessage: 'A new, secure token has been assigned to your account. You\'re all set.',
-            errorTitle: 'Assignment Failed',
-            errorMessageDefault: 'An unknown error occurred.',
+            errorTitle: 'Update Connection',
+            errorMessageDefault: 'Please click Try Again to update your connection.',
             retryButton: 'Try Again'
         },
         serverSelectionModal: {
@@ -708,7 +708,8 @@ const translations = {
             title: 'Settings',
             tabs: {
                 profile: 'User Profile',
-                api: 'Token!',
+// FIX: Changed tab label from "Token!" to "Integrations" for clarity.
+                api: 'Integrations',
                 contentAdmin: 'Content Admin',
                 userDb: 'User Database'
             },

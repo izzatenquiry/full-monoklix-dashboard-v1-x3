@@ -566,6 +566,29 @@ const App: React.FC = () => {
         };
     }, [currentUser?.id, handleLogout, T.sessionTerminated]);
     
+    // Effect for 1-hour session timeout
+    useEffect(() => {
+        let sessionTimeoutId: number;
+
+        if (currentUser) {
+            const ONE_HOUR_IN_MS = 60 * 60 * 1000;
+            console.log(`[Session] Starting 1-hour auto-logout timer.`);
+            
+            sessionTimeoutId = window.setTimeout(() => {
+                console.log('[Session] 1-hour session expired. Forcing logout.');
+                handleLogout();
+            }, ONE_HOUR_IN_MS);
+        }
+
+        // Cleanup function to clear the timer if the user logs out manually or component unmounts
+        return () => {
+            if (sessionTimeoutId) {
+                clearTimeout(sessionTimeoutId);
+                console.log('[Session] Auto-logout timer cleared.');
+            }
+        };
+    }, [currentUser, handleLogout]);
+
   const proceedWithPostLoginFlow = (user: User) => {
     // Directly let user in without blocking modal.
     // If user has no token, they can claim manually via Settings or ApiKeyStatus.
