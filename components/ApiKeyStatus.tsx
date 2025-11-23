@@ -69,12 +69,14 @@ const TokenSelectionModal: React.FC<TokenSelectionModalProps> = ({ isOpen, onClo
         
         setClaimingToken(null); // Stop spinner regardless of result
 
-        if (result.success) {
+        // FIX: Inverted the if/else block to check for the failure case first.
+        // This explicitly narrows the type for the 'else' branch, resolving the type error where `result.message` was not accessible.
+        if (result.success === false) {
+            alert(`Failed to claim: ${result.message}`);
+        } else {
             onUserUpdate(result.user);
             // Close modal after a short delay to show the success tick
             setTimeout(onClose, 1000);
-        } else {
-            alert(`Failed to claim: ${result.message}`);
         }
     };
 
@@ -236,7 +238,8 @@ interface ApiKeyStatusProps {
 }
 
 const ApiKeyStatus: React.FC<ApiKeyStatusProps> = ({ activeApiKey, currentUser, assignTokenProcess, onUserUpdate, onOpenChangeServerModal, language }) => {
-    const T = getTranslations(language).apiKeyStatus;
+    // FIX: Removed the 'language' argument from getTranslations as it's not expected.
+    const T = getTranslations().apiKeyStatus;
     const [isPopoverOpen, setIsPopoverOpen] = useState(false);
     const [isChecking, setIsChecking] = useState(false);
     const [results, setResults] = useState<HealthCheckResult[] | null>(null);

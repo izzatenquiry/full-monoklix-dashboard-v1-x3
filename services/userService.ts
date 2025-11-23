@@ -487,9 +487,9 @@ export const logActivity = async (
  * @returns {Promise<{ token: string; createdAt: string }[] | null>} An array of token objects or null if not found/error.
  */
 export const getVeoAuthTokens = async (): Promise<{ token: string; createdAt: string }[] | null> => {
-    // FIX: Use the correct table name 'token_new_active'.
+    // FIX: Use the correct table name 'token_new_active_v3'.
     const { data, error } = await supabase
-        .from('token_new_active')
+        .from('token_new_active_v3')
         .select('token, created_at')
         .order('created_at', { ascending: false })
         .limit(20);
