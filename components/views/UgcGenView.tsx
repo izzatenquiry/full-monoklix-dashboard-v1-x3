@@ -622,8 +622,8 @@ const UgcGeneratorView: React.FC<UgcGeneratorViewProps> = ({ currentUser, langua
                         <div>
                             <label className="block text-sm font-medium mb-2">Reference Images (For I2I)</label>
                             <div className="grid grid-cols-2 gap-2">
-                                 <div className="flex flex-col h-full"><ImageUpload id="master-upload-1" key={uploadKeys[0]} onImageUpload={(base64, mimeType) => handleImageUpdate(0, { base64, mimeType })} onRemove={() => handleImageUpdate(0, null)} language={language} title="Ref Image 1 (Primary)" /></div>
-                                 <div className="flex flex-col h-full"><ImageUpload id="master-upload-2" key={uploadKeys[1]} onImageUpload={(base64, mimeType) => handleImageUpdate(1, { base64, mimeType })} onRemove={() => handleImageUpdate(1, null)} language={language} title="Ref Image 2" /></div>
+                                 <div className="flex flex-col h-full"><ImageUpload id="master-upload-1" key={uploadKeys[0]} onImageUpload={(base64, mimeType) => handleImageUpdate(0, { base64, mimeType })} onRemove={() => handleImageUpdate(0, null)} language={language} title="Upload Image 1 (Primary)" /></div>
+                                 <div className="flex flex-col h-full"><ImageUpload id="master-upload-2" key={uploadKeys[1]} onImageUpload={(base64, mimeType) => handleImageUpdate(1, { base64, mimeType })} onRemove={() => handleImageUpdate(1, null)} language={language} title="Upload Image 2" /></div>
                             </div>
                         </div>
                         <div className="mt-4 pt-4 border-t border-neutral-200 dark:border-neutral-800">

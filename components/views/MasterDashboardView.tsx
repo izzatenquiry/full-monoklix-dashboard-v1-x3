@@ -528,7 +528,7 @@ const MasterDashboardView: React.FC<MasterDashboardViewProps> = ({ currentUser, 
                                         onImageUpload={(base64, mimeType) => handleImageUpdate(0, { base64, mimeType })}
                                         onRemove={() => handleImageUpdate(0, null)}
                                         language={language}
-                                        title="Ref Image 1 (Primary)"
+                                        title="Upload Image 1 (Primary)"
                                     />
                                  </div>
                                  <div className="flex flex-col h-full">
@@ -538,7 +538,7 @@ const MasterDashboardView: React.FC<MasterDashboardViewProps> = ({ currentUser, 
                                         onImageUpload={(base64, mimeType) => handleImageUpdate(1, { base64, mimeType })}
                                         onRemove={() => handleImageUpdate(1, null)}
                                         language={language}
-                                        title="Ref Image 2"
+                                        title="Upload Image 2"
                                     />
                                  </div>
                             </div>
